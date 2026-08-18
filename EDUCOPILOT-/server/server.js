@@ -3,25 +3,256 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const mongoose = require('mongoose');
 const path = require('path');
+const { spawn } = require('child_process');
+const http = require('http');
+
 const connectDB = require('./config/db');
 
-// Load environment variables
+// =====================================================
+// LOAD ENVIRONMENT VARIABLES
+// =====================================================
+
 dotenv.config();
 
 const app = express();
 
 // =====================================================
-// MIDDLEWARES
+// CONFIGURATION
+// =====================================================
+
+const PORT = process.env.PORT || 5000;
+
+const AI_SERVICE_HOST = '127.0.0.1';
+const AI_SERVICE_PORT = 8000;
+
+// =====================================================
+// AI SERVICE PROCESS
+// =====================================================
+
+let aiProcess = null;
+
+// =====================================================
+// START PYTHON AI SERVICE
+// =====================================================
+
+const startAIService = () => {
+
+  console.log('=========================================');
+  console.log('🤖 STARTING PYTHON AI SERVICE');
+  console.log('=========================================');
+
+  const aiPath = path.join(__dirname, '../ai_service');
+
+  console.log(`📁 AI Service Path: ${aiPath}`);
+
+  aiProcess = spawn(
+    'python3',
+    ['main.py'],
+    {
+      cwd: aiPath,
+
+      env: {
+        ...process.env,
+
+        PYTHONUNBUFFERED: '1',
+
+        HOST: '0.0.0.0',
+
+        PORT: String(AI_SERVICE_PORT)
+      },
+
+      stdio: ['ignore', 'pipe', 'pipe']
+    }
+  );
+
+  // ===================================================
+  // AI STDOUT
+  // ===================================================
+
+  aiProcess.stdout.on('data', (data) => {
+
+    console.log(
+      `[AI Service] ${data.toString().trim()}`
+    );
+
+  });
+
+  // ===================================================
+  // AI STDERR
+  // ===================================================
+
+  aiProcess.stderr.on('data', (data) => {
+
+    console.error(
+      `[AI Service] ${data.toString().trim()}`
+    );
+
+  });
+
+  // ===================================================
+  // AI PROCESS ERROR
+  // ===================================================
+
+  aiProcess.on('error', (error) => {
+
+    console.error(
+      '❌ Failed to start Python AI service:',
+      error.message
+    );
+
+  });
+
+  // ===================================================
+  // AI PROCESS EXIT
+  // ===================================================
+
+  aiProcess.on('exit', (code, signal) => {
+
+    console.log(
+      `⚠️ Python AI service stopped. code=${code}, signal=${signal}`
+    );
+
+  });
+
+  console.log(
+    `🤖 AI Service starting on http://${AI_SERVICE_HOST}:${AI_SERVICE_PORT}`
+  );
+};
+
+// =====================================================
+// CHECK AI SERVICE
+// =====================================================
+
+const checkAIService = () => {
+
+  return new Promise((resolve) => {
+
+    const req = http.get(
+      `http://${AI_SERVICE_HOST}:${AI_SERVICE_PORT}/health`,
+
+      (res) => {
+
+        let data = '';
+
+        res.on('data', (chunk) => {
+
+          data += chunk;
+
+        });
+
+        res.on('end', () => {
+
+          if (res.statusCode === 200) {
+
+            resolve({
+              ready: true,
+              statusCode: res.statusCode,
+              data
+            });
+
+          } else {
+
+            resolve({
+              ready: false,
+              statusCode: res.statusCode,
+              data
+            });
+
+          }
+
+        });
+
+      }
+    );
+
+    req.on('error', () => {
+
+      resolve({
+        ready: false,
+        statusCode: 0,
+        data: null
+      });
+
+    });
+
+    req.setTimeout(3000, () => {
+
+      req.destroy();
+
+      resolve({
+        ready: false,
+        statusCode: 0,
+        data: null
+      });
+
+    });
+
+  });
+
+};
+
+// =====================================================
+// WAIT FOR AI SERVICE
+// =====================================================
+
+const waitForAIService = async () => {
+
+  console.log('=========================================');
+  console.log('⏳ WAITING FOR AI SERVICE');
+  console.log('=========================================');
+
+  for (let attempt = 1; attempt <= 60; attempt++) {
+
+    const result = await checkAIService();
+
+    if (result.ready) {
+
+      console.log('=========================================');
+      console.log('✅ PYTHON AI SERVICE READY');
+      console.log('=========================================');
+
+      console.log(
+        `[AI Health] ${result.data}`
+      );
+
+      return true;
+    }
+
+    console.log(
+      `⏳ AI service not ready... attempt ${attempt}/60`
+    );
+
+    await new Promise((resolve) => {
+
+      setTimeout(resolve, 2000);
+
+    });
+
+  }
+
+  console.error(
+    '❌ Python AI service did not become ready.'
+  );
+
+  return false;
+};
+
+// =====================================================
+// MIDDLEWARE
 // =====================================================
 
 app.use(cors());
 
-app.use(express.json({ limit: '20mb' }));
+app.use(
+  express.json({
+    limit: '20mb'
+  })
+);
 
 app.use(
   express.urlencoded({
     extended: true,
-    limit: '20mb',
+    limit: '20mb'
   })
 );
 
@@ -30,132 +261,199 @@ app.use(
 // =====================================================
 
 app.use((req, res, next) => {
-  // Always allow health check
+
+  // Always allow health checks
+
   if (
     req.path === '/api/health' ||
     req.path === '/health'
   ) {
+
     return next();
+
   }
 
-  // Check MongoDB connection
+  // Check MongoDB
+
   if (mongoose.connection.readyState !== 1) {
+
     return res.status(503).json({
+
       error:
-        'Database is currently unavailable. Please ensure MongoDB is running.',
+        'Database is currently unavailable. Please ensure MongoDB is running.'
+
     });
+
   }
 
   next();
+
 });
 
 // =====================================================
 // API ROUTES
 // =====================================================
 
-app.use('/api/auth', require('./routes/auth'));
+app.use(
+  '/api/auth',
+  require('./routes/auth')
+);
 
-app.use('/api/student', require('./routes/student'));
+app.use(
+  '/api/student',
+  require('./routes/student')
+);
 
-app.use('/api/professor', require('./routes/professor'));
+app.use(
+  '/api/professor',
+  require('./routes/professor')
+);
 
-app.use('/api/rag', require('./routes/rag'));
+app.use(
+  '/api/rag',
+  require('./routes/rag')
+);
 
-app.use('/api/support', require('./routes/support'));
+app.use(
+  '/api/support',
+  require('./routes/support')
+);
 
 // =====================================================
 // AI SERVICE PROXY
-// =====================================================
 //
 // Public:
-// http://16.192.179.216:5000/api/ai/...
+// /api/ai/...
 //
 // Internal:
-// http://educopilot-ai-container:8000/...
-//
-// The AI service remains private inside Docker.
+// http://127.0.0.1:8000/...
 // =====================================================
 
-const AI_SERVICE_URL =
-  process.env.AI_SERVICE_URL ||
-  'http://localhost:8000';
+app.use('/api/ai', (req, res) => {
 
-app.use('/api/ai', async (req, res) => {
-  try {
-    // Remove /api/ai from the request path
-    const aiPath = req.originalUrl.replace(/^\/api\/ai/, '');
+  const aiPath =
+    req.originalUrl.replace('/api/ai', '') || '/';
 
-    const targetUrl = `${AI_SERVICE_URL}${aiPath || '/'}`;
+  console.log(
+    `🤖 AI Request: ${req.method} ${req.originalUrl}`
+  );
 
-    console.log('=========================================');
-    console.log('AI SERVICE REQUEST');
-    console.log('Method:', req.method);
-    console.log('Target:', targetUrl);
-    console.log('=========================================');
+  const options = {
 
-    // Prepare headers
-    const headers = {
-      'Content-Type': 'application/json',
-    };
+    hostname: AI_SERVICE_HOST,
 
-    // Forward authorization if present
-    if (req.headers.authorization) {
-      headers.authorization = req.headers.authorization;
+    port: AI_SERVICE_PORT,
+
+    path: aiPath,
+
+    method: req.method,
+
+    headers: {
+      ...req.headers,
+
+      host:
+        `${AI_SERVICE_HOST}:${AI_SERVICE_PORT}`,
+
+      connection: 'close'
     }
 
-    // Prepare fetch options
-    const options = {
-      method: req.method,
-      headers,
-    };
+  };
 
-    // Send body for methods that support a body
-    if (
-      req.method !== 'GET' &&
-      req.method !== 'HEAD' &&
-      req.body &&
-      Object.keys(req.body).length > 0
-    ) {
-      options.body = JSON.stringify(req.body);
+  const proxyReq = http.request(
+    options,
+
+    (proxyRes) => {
+
+      res.status(
+        proxyRes.statusCode || 500
+      );
+
+      // Forward headers
+
+      Object.keys(proxyRes.headers).forEach(
+        (header) => {
+
+          const value =
+            proxyRes.headers[header];
+
+          if (value !== undefined) {
+
+            res.setHeader(
+              header,
+              value
+            );
+
+          }
+
+        }
+      );
+
+      proxyRes.pipe(res);
+
+    }
+  );
+
+  proxyReq.on('error', (error) => {
+
+    console.error(
+      '❌ AI proxy error:',
+      error.message
+    );
+
+    if (!res.headersSent) {
+
+      res.status(503).json({
+
+        error:
+          'AI service is temporarily unavailable.'
+
+      });
+
     }
 
-    // Call Python AI service
-    const response = await fetch(targetUrl, options);
+  });
 
-    const contentType =
-      response.headers.get('content-type') || '';
+  proxyReq.setTimeout(
+    120000,
+    () => {
 
-    const responseText = await response.text();
+      console.error(
+        '❌ AI request timeout'
+      );
 
-    // Preserve response status
-    res.status(response.status);
+      proxyReq.destroy();
 
-    // Return JSON response
-    if (contentType.includes('application/json')) {
-      try {
-        const jsonResponse = JSON.parse(responseText);
+      if (!res.headersSent) {
 
-        return res.json(jsonResponse);
-      } catch (parseError) {
-        return res.send(responseText);
+        res.status(504).json({
+
+          error:
+            'AI service request timed out.'
+
+        });
+
       }
+
     }
+  );
 
-    // Return non-JSON response
-    return res.send(responseText);
+  // ===================================================
+  // FORWARD REQUEST BODY
+  // ===================================================
 
-  } catch (error) {
-    console.error('=========================================');
-    console.error('AI SERVICE ERROR');
-    console.error(error.message);
-    console.error('=========================================');
+  if (
+    req.body &&
+    Object.keys(req.body).length > 0
+  ) {
 
-    return res.status(503).json({
-      success: false,
-      error: 'AI service is currently unavailable',
-      details: error.message,
-    });
+    proxyReq.write(
+      JSON.stringify(req.body)
+    );
+
   }
+
+  proxyReq.end();
+
 });
 
 // =====================================================
@@ -163,120 +461,261 @@ app.use('/api/ai', async (req, res) => {
 // =====================================================
 
 app.get('/health', (req, res) => {
+
   res.json({
+
     status: 'ok',
+
+    service:
+      'EduCopilot Backend API'
+
   });
+
 });
 
-app.get('/api/health', (req, res) => {
+// =====================================================
+// API HEALTH CHECK
+// =====================================================
+
+app.get('/api/health', async (req, res) => {
+
   const dbStatus =
     mongoose.connection.readyState === 1
       ? 'connected'
       : 'disconnected';
 
+  const aiResult =
+    await checkAIService();
+
   res.json({
+
     status: 'ok',
+
     database: dbStatus,
-    service: 'EduCopilot Backend API',
-    llmProvider: process.env.GROQ_API_KEY
-      ? 'Groq API'
-      : 'Fallback Engine (Active)',
+
+    service:
+      'EduCopilot Backend API',
+
+    llmProvider:
+      process.env.GROQ_API_KEY
+        ? 'Groq API'
+        : 'Fallback Engine (Active)',
+
     model:
-      process.env.GROQ_MODEL || 'groq/compound-mini',
-    aiService:
-      process.env.AI_SERVICE_URL ||
-      'http://localhost:8000',
-    timestamp: new Date().toISOString(),
+      process.env.GROQ_MODEL ||
+      'llama-3.3-70b-versatile',
+
+    aiService: {
+
+      status:
+        aiResult.ready
+          ? 'connected'
+          : 'disconnected',
+
+      internalHost:
+        AI_SERVICE_HOST,
+
+      internalPort:
+        AI_SERVICE_PORT,
+
+      internalUrl:
+        `http://${AI_SERVICE_HOST}:${AI_SERVICE_PORT}`
+
+    },
+
+    timestamp:
+      new Date().toISOString()
+
   });
+
 });
 
 // =====================================================
 // SERVE REACT FRONTEND
 // =====================================================
 
-// Docker structure:
-//
-// /app
-// ├── server
-// │   └── server.js
-// └── client
-//     └── dist
-//         ├── index.html
-//         └── assets
-//
-// Since __dirname = /app/server,
-// ../client/dist = /app/client/dist
+const clientPath =
+  path.join(
+    __dirname,
+    '../client/dist'
+  );
 
-const clientPath = path.join(
-  __dirname,
-  '../client/dist'
+console.log(
+  `📁 Client Path: ${clientPath}`
 );
 
-// Serve React static files
-app.use(express.static(clientPath));
+app.use(
+  express.static(clientPath)
+);
 
 // =====================================================
 // REACT ROUTER FALLBACK
 // =====================================================
 
 app.get('*', (req, res) => {
+
   res.sendFile(
-    path.join(clientPath, 'index.html')
+    path.join(
+      clientPath,
+      'index.html'
+    )
   );
+
 });
 
 // =====================================================
 // GLOBAL ERROR HANDLER
 // =====================================================
 
-app.use((err, req, res, next) => {
-  console.error(
-    '[Server Error]',
-    err.stack || err
-  );
+app.use(
+  (err, req, res, next) => {
 
-  res.status(err.status || 500).json({
-    error:
-      err.message ||
-      'Internal Server Error',
-  });
-});
+    console.error(
+      '[Server Error]',
+      err.stack || err
+    );
+
+    res.status(
+      err.status || 500
+    ).json({
+
+      error:
+        err.message ||
+        'Internal Server Error'
+
+    });
+
+  }
+);
 
 // =====================================================
-// SERVER START
+// START SERVER
 // =====================================================
-
-const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
+
   try {
-    // Connect to MongoDB first
+
+    // =================================================
+    // CONNECT MONGODB
+    // =================================================
+
+    console.log(
+      '🔄 Connecting to MongoDB...'
+    );
+
     await connectDB();
 
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log('=========================================');
-      console.log(
-        `🚀 EduCopilot API Server running on port ${PORT}`
-      );
-      console.log(
-        `🌐 Application: http://0.0.0.0:${PORT}/`
-      );
-      console.log(
-        `🔗 Health Check: http://0.0.0.0:${PORT}/api/health`
-      );
-      console.log(
-        `🤖 AI Service: ${AI_SERVICE_URL}`
-      );
-      console.log('=========================================');
-    });
+    console.log(
+      '✅ MongoDB connected'
+    );
+
+    // =================================================
+    // START PYTHON AI SERVICE
+    // =================================================
+
+    startAIService();
+
+    // =================================================
+    // START NODE SERVER
+    // =================================================
+
+    app.listen(
+      PORT,
+      '0.0.0.0',
+      async () => {
+
+        console.log(
+          '========================================='
+        );
+
+        console.log(
+          `🚀 EduCopilot Backend running on port ${PORT}`
+        );
+
+        console.log(
+          `🌐 Application: http://0.0.0.0:${PORT}/`
+        );
+
+        console.log(
+          `🔗 Health: http://0.0.0.0:${PORT}/api/health`
+        );
+
+        console.log(
+          `🤖 Internal AI: http://${AI_SERVICE_HOST}:${AI_SERVICE_PORT}`
+        );
+
+        console.log(
+          '========================================='
+        );
+
+        // Wait for AI
+
+        const aiReady =
+          await waitForAIService();
+
+        if (!aiReady) {
+
+          console.error(
+            '⚠️ WARNING: AI service is not ready.'
+          );
+
+        }
+
+      }
+    );
+
   } catch (error) {
+
     console.error(
       '❌ Failed to start server:',
       error.message
     );
 
     process.exit(1);
+
   }
+
 };
+
+// =====================================================
+// GRACEFUL SHUTDOWN
+// =====================================================
+
+const shutdown = () => {
+
+  console.log(
+    '🛑 Shutting down EduCopilot...'
+  );
+
+  if (aiProcess) {
+
+    console.log(
+      '🛑 Stopping Python AI service...'
+    );
+
+    aiProcess.kill(
+      'SIGTERM'
+    );
+
+  }
+
+  process.exit(0);
+
+};
+
+process.on(
+  'SIGTERM',
+  shutdown
+);
+
+process.on(
+  'SIGINT',
+  shutdown
+);
+
+// =====================================================
+// START
+// =====================================================
 
 startServer();
