@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-main: #F4F1ED;
+    --bg-surface: #FFFFFF;
+    --bg-elevated: #FAFAF8;
+    --color-primary-red: #B11226;
+    --color-bright-red: #E5092F;
+    --color-text-main: #151515;
+    --color-border: #E2DDD7;
+  }
+
+  .dark {
+    --bg-main: #0B0B0B;
+    --bg-surface: #141414;
+    --bg-elevated: #1F1F1F;
+    --color-primary-red: #E5092F;
+    --color-bright-red: #FF1E42;
+    --color-text-main: #F5F5F0;
+    --color-border: #262626;
+  }
+
+  body {
+    background: #F4F1ED !important;
+    @apply text-slate-900 selection:bg-red-100 selection:text-red-900 transition-colors duration-200;
+  }
+
+  .dark body,
+  body.dark {
+    background: #0B0B0B !important;
+    background-image: radial-gradient(circle at 50% 0%, rgba(229, 9, 47, 0.12) 0%, transparent 65%) !important;
+    @apply text-slate-100 selection:bg-red-950 selection:text-red-200;
+  }
+
+  .min-h-screen.bg-slate-50,
+  .min-h-screen.dark\:bg-slate-950 {
+    background: transparent !important;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #E2DDD7;
+  border-radius: 9999px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #333333;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #E5092F;
+}
+
+/* Money Heist Tactical Operation Styling Helpers */
+.glass-panel {
+  @apply bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border border-slate-200 dark:border-slate-800 shadow-sm;
+}
+
+.glass-card {
+  @apply bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm hover:shadow-md hover:border-red-500/40 dark:hover:border-red-500/40 transition-all duration-200;
+}
+
+.heist-glow-red {
+  box-shadow: 0 0 25px rgba(229, 9, 47, 0.25);
+}
+
+.heist-border-red {
+  border-color: rgba(229, 9, 47, 0.4) !important;
+}
+
+.heist-badge {
+  @apply uppercase tracking-wider font-extrabold text-[10px] px-2.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200/80 dark:bg-red-950/60 dark:text-red-300 dark:border-red-800/80;
+}
